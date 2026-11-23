@@ -2267,7 +2267,7 @@ if (process.env.POPSNAP_FRONTEND) {
   if (fs.existsSync(path.join(feDir, "index.html"))) {
     app.use(express.static(feDir, { index: false, maxAge: "1h", setHeaders: (res, f) => { if (f.endsWith("index.html")) res.setHeader("Cache-Control", "no-cache"); } }));
     app.use((req, res, next) => { // rute React (/admin, /kasir, ...): selalu index.html; /api, /uploads, /s tetap urusan backend
-      if (req.method !== "GET" || /^\/(api|uploads|s)(\/|$)/.test(req.path) || !req.accepts("html")) return next();
+      if (req.method !== "GET" || /^\/(api|uploads|s)(\/|$)/.test(req.path) || path.extname(req.path) || !req.accepts("html")) return next(); // berkas bernama ekstensi yang tak ada = 404 betulan, bukan index.html
       res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(feDir, "index.html"));
     });

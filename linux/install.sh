@@ -24,7 +24,7 @@ fi
 
 getent group popsnap >/dev/null || groupadd --system popsnap
 id popsnap >/dev/null 2>&1 || useradd --system --gid popsnap --home-dir "$DATA" --shell /usr/sbin/nologin popsnap
-mkdir -p "$DATA"; chown popsnap:popsnap "$DATA"
+mkdir -p "$DATA"; chown -R popsnap:popsnap "$DATA"
 
 systemctl stop popsnap 2>/dev/null || true
 if [ -f "$DATA/db/popsnap.db" ]; then   # cadangan database sebelum menimpa aplikasi

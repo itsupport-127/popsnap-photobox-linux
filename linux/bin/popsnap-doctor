@@ -39,9 +39,10 @@ else warn "curl tidak ada: cek port dilewati"; fi
 
 B=""; for b in "${CHROME_BIN:-}" google-chrome-stable google-chrome chromium chromium-browser; do [ -n "$b" ] && command -v "$b" >/dev/null 2>&1 && { B="$b"; break; }; done
 [ -n "$B" ] && ok "Browser: $B" || bad "Chrome/Chromium tidak ditemukan (untuk kiosk)"
+case "$(readlink -f "$(command -v "$B" 2>/dev/null)" 2>/dev/null)" in /snap/*|*/snap/*) warn "Browser ini versi snap: kamera, folder profil, dan cetak sering bermasalah di mode kiosk. Pakai google-chrome-stable (.deb dari Google) atau Chromium non-snap.";; esac
 
 if ls /dev/video* >/dev/null 2>&1; then ok "Kamera: $(ls /dev/video* | tr '\n' ' ')"; else warn "Tidak ada /dev/video* (webcam tidak terdeteksi; kamera DSLR/Canon/Nikon via SDK tidak didukung di Linux)"; fi
-u="${SUDO_USER:-$(id -un)}"; id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx video && ok "User $u ada di grup video" || warn "User $u tidak ada di grup video (sudo usermod -aG video $u, lalu login ulang)"
+u="${SUDO_USER:-$(id -un)}"; [ "$u" = root ] && ok "Cek grup video dilewati (dijalankan sebagai root; jalankan tanpa sudo sebagai user booth)" || id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx video && ok "User $u ada di grup video" || warn "User $u tidak ada di grup video (sudo usermod -aG video $u, lalu login ulang)"
 
 if command -v lpstat >/dev/null 2>&1; then
   d="$(lpstat -d 2>/dev/null | sed 's/.*: //')"

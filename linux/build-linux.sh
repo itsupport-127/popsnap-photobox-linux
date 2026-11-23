@@ -33,6 +33,7 @@ BASE="popsnap-$VERSION-linux-$ARCH_DEB"
 echo "== tar.gz"
 T="$STAGE/$BASE"; mkdir -p "$T"; cp -a "$APP" "$T/app"
 cp "$L/install.sh" "$L/popsnap.conf" "$L/systemd/popsnap.service" "$L/xdg/popsnap-kiosk.desktop" "$L/README-LINUX.md" "$T/"
+chmod 755 "$T/install.sh"   # repo dari Windows: berkas tanpa izin eksekusi
 tar -C "$STAGE" -czf "$OUT/$BASE.tar.gz" "$BASE"
 
 echo "== .deb"

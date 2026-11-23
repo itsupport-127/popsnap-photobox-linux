@@ -1,5 +1,7 @@
 # POPSNAP — Photobox App
 
+> **Dilanjutkan oleh orang/AI lain?** Baca [docs/README.md](docs/README.md) (riwayat pengerjaan, alur aplikasi, status paket Linux). Panduan pasang Linux: [linux/README-LINUX.md](linux/README-LINUX.md).
+
 Fondasi aplikasi photobooth sesuai alur 7 tahap: Welcome → Pilih Template →
 Pembayaran (QRIS/Voucher) → Sesi Foto (8 shot, retake) → Editor (filter/stiker) →
 Hasil + QR Download.
