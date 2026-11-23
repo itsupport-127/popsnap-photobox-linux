@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+DATA=/var/lib/popsnap
+if [ "$1" = "configure" ]; then
+  getent group popsnap >/dev/null || addgroup --system popsnap >/dev/null
+  id popsnap >/dev/null 2>&1 || adduser --system --ingroup popsnap --home "$DATA" --no-create-home --shell /usr/sbin/nologin popsnap >/dev/null
+  mkdir -p "$DATA"; chown -R popsnap:popsnap "$DATA"
+  ln -sf /opt/popsnap/bin/popsnap-doctor /usr/bin/popsnap-doctor
+  ln -sf /opt/popsnap/bin/popsnap-kiosk /usr/bin/popsnap-kiosk
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl enable popsnap >/dev/null 2>&1 || true
+    systemctl restart popsnap || echo "POPSNAP: layanan belum bisa jalan, cek: popsnap-doctor" >&2
+  fi
+  echo "POPSNAP terpasang. Cek: popsnap-doctor | Kiosk Chrome otomatis di login desktop berikutnya (atau: popsnap-kiosk)"
+fi
+exit 0

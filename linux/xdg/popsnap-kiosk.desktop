@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=POPSNAP Kiosk
+Comment=Buka tampilan booth POPSNAP layar penuh
+Exec=/opt/popsnap/bin/popsnap-kiosk
+Terminal=false
+X-GNOME-Autostart-enabled=true

@@ -1,0 +1,76 @@
+// ==========================================================
+// Payment Service — SEMUA lewat backend lokal.
+//
+// Sebelumnya ada mode "simulasi" di sisi frontend yang menerima voucher apa pun
+// (>= 4 karakter) dan melunasi QRIS otomatis. Itu dihapus supaya booth produksi
+// tidak bisa dipakai gratis. Simulasi QRIS (khusus testing) sekarang hanya bisa
+// dinyalakan sengaja dari Admin > Pembayaran.
+// ==========================================================
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:4000";
+
+/** Mode foto: kirim templateId. Mode GIF/Boomerang/Video: kirim mode (harga diambil server dari pengaturan). */
+export async function createQrisPayment({ templateId, mode, discountCode, flat }) {
+  const res = await fetch(`${API_BASE}/api/payment/qris`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...(mode && mode !== "photo" ? { mode } : templateId ? { templateId } : flat ? { flat: true } : { templateId }), ...(discountCode ? { discountCode } : {}) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Gagal membuat QRIS.");
+  return data; // { orderId, qrImageUrl | qrString, amount }
+}
+
+/** Add Print berbayar: QRIS untuk N salinan cetak tambahan (harga dihitung server dari pengaturan). */
+export async function createPrintPayment({ copies, sessionId }) {
+  const res = await fetch(`${API_BASE}/api/payment/qris`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "print", copies, sessionId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Gagal membuat QRIS.");
+  return data; // { orderId, qrImageUrl | qrString, amount }
+}
+
+export async function checkPaymentStatus(orderId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/payment/status/${orderId}`);
+    const data = await res.json();
+    return data.status; // "pending" | "paid" | "expired"
+  } catch {
+    return "pending"; // koneksi putus sesaat: tetap polling
+  }
+}
+
+/** @returns {Promise<{valid: boolean, reason?: string, orderNo?: string|null}>} orderNo = nomor transaksi (sama dengan di aplikasi kasir) */
+export async function validateVoucher(code, { templateId, mode, flat } = {}) {
+  try {
+    const res = await fetch(`${API_BASE}/api/voucher/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, templateId, mode, ...(flat && !templateId ? { flat: true } : {}) }),
+    });
+    const data = await res.json();
+    return { valid: data.valid === true, reason: data.reason, orderNo: data.orderNo || null };
+  } catch {
+    return { valid: false, reason: "Tidak bisa terhubung ke sistem booth. Hubungi kasir." };
+  }
+}
+
+/**
+ * Potongan harga dari kasir (promo otomatis + kode diskon). Hanya menanyakan, tidak memakai kuota.
+ * @returns {Promise<{enabled:boolean, ok:boolean, unreachable?:boolean, error?:string|null, gross?:number, discount?:number, final?:number, auto?:{name:string,discount:number}|null, code?:{code:string,name:string,discount:number}|null}>}
+ */
+export async function quoteDiscount({ templateId, mode, code, flat } = {}) {
+  try {
+    const res = await fetch(`${API_BASE}/api/discount/quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...(mode && mode !== "photo" ? { mode } : templateId ? { templateId } : flat ? { flat: true } : { templateId }), ...(code ? { code } : {}) }),
+    });
+    return await res.json();
+  } catch {
+    return { enabled: false, ok: false };
+  }
+}

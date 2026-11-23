@@ -1,0 +1,307 @@
+import React, { useEffect, useRef, useState } from "react";
+import { NumInput } from "../editorKit";
+import { Btn, Card, Notice } from "../ui";
+import { Check, Range, Row, Select } from "./controls";
+import { buildCameraExport, applyImport, downloadJson } from "../settingsTransfer";
+import { DEFAULT_FILTERS } from "../../utils/filters";
+import { effectiveRotation } from "../../utils/cameraRotation";
+import LiveView from "../../components/LiveView";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:4000";
+const RES_LABEL = ["640×480 · frame rate tertinggi", "1280×720 (HD)", "1920×1080 (Full HD)", "3840×2160 (4K) · kualitas tertinggi"];
+const RES = [[640, 480], [1280, 720], [1920, 1080], [3840, 2160]];
+
+export default function SettingsCamera({ s, set, only }) {
+  const vis = (t) => !only || only.includes(t); // tampilkan hanya kartu yang diminta halaman Pengaturan (pengelompokan baru)
+  const c = s.camera;
+  const [devices, setDevices] = useState({ video: [], audio: [] });
+  const [msg, setMsg] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [profMsg, setProfMsg] = useState(null);
+  const profRef = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
+  function exportCamera() { downloadJson(buildCameraExport(s), `popsnap-kamera-${new Date().toISOString().slice(0, 10)}.json`); setProfMsg({ ok: "Berkas profil kamera diunduh." }); }
+  async function importCamera(e) {
+    const f = e.target.files?.[0]; e.target.value = "";
+    if (!f) return;
+    try {
+      const parsed = JSON.parse(await f.text());
+      if (!parsed?.settings?.camera) throw new Error("Berkas ini tidak berisi pengaturan kamera.");
+      const { next, changed } = applyImport({ camera: s.camera }, { ...parsed, settings: { camera: parsed.settings.camera } });
+      if (!changed) { setProfMsg({ err: "Pengaturan kamera di berkas ini sama dengan yang sekarang." }); return; }
+      set(["camera"], next.camera);
+      setProfMsg({ ok: `${changed} pengaturan kamera dimuat. Periksa, lalu tekan Save untuk menerapkan (Cancel untuk membatalkan). Hanya pengaturan kamera yang berubah; webcam / kamera DSLR PC ini tetap.` });
+    } catch (err) { setProfMsg({ err: err.message || "Berkas tidak bisa dibaca." }); }
+  }
+
+  async function detect() {
+    setMsg(null);
+    try {
+      // Nama perangkat baru terbaca setelah izin kamera/mikrofon diberikan
+      const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }).catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+      tmp.getTracks().forEach((t) => t.stop());
+      const all = await navigator.mediaDevices.enumerateDevices();
+      setDevices({
+        video: all.filter((d) => d.kind === "videoinput").map((d) => [d.deviceId, d.label || "Kamera"]),
+        audio: all.filter((d) => d.kind === "audioinput").map((d) => [d.deviceId, d.label || "Mikrofon"]),
+      });
+    } catch (err) {
+      setMsg(err.message || "Tidak bisa membaca perangkat. Izinkan akses kamera di browser.");
+    }
+  }
+  useEffect(() => { detect(); }, []);
+
+  // ---- DSLR / mirrorless lewat digiCamControl ----
+  const [dslr, setDslr] = useState(null);   // hasil /api/camera/dslr/status
+  const [dslrBusy, setDslrBusy] = useState(false);
+  const [lvTest, setLvTest] = useState(false);
+  const [shot, setShot] = useState(null); // hasil tes jepret: { busy } | { image } | { error }
+  const [lvSrc, setLvSrc] = useState(null);
+  const d = c.dslr ?? { host: "http://localhost:5513", camera: "", driver: "digicam", model: "", zModel: "" };
+  async function detectDslr() {
+    setDslrBusy(true);
+    try { setDslr(await fetch(`${API_BASE}/api/camera/dslr/status`).then((r) => r.json())); }
+    catch (err) { setDslr({ online: false, cameras: [], error: err.message }); }
+    setDslrBusy(false);
+  }
+  useEffect(() => { if (c.mode === "dslr") detectDslr(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.mode]);
+  const [lvFps, setLvFps] = useState(null);
+  const [lvStale, setLvStale] = useState(false);
+  useEffect(() => {
+    if (!lvTest) return undefined;
+    setLvSrc(`${API_BASE}/api/camera/dslr/stream?t=${Date.now()}`); // aliran MJPEG, sama seperti di layar sesi foto
+    let stop = false, gotFrames = false;
+    setLvStale(false);
+    const staleTimer = setTimeout(() => { if (!stop && !gotFrames) setLvStale(true); }, 8000); // 8 detik tanpa gambar = beri tahu, jangan diam saja
+    (async () => {
+      while (!stop) {
+        await new Promise((x) => setTimeout(x, 1500));
+        try { const r = await fetch(`${API_BASE}/api/camera/dslr/status`).then((x) => x.json()); if (!stop) { setLvFps(r.fps ?? null); if (r.fps > 0) { gotFrames = true; setLvStale(false); } } } catch { /* abaikan */ }
+      }
+    })();
+    return () => { stop = true; clearTimeout(staleTimer); setLvStale(false); setLvFps(null); fetch(`${API_BASE}/api/camera/dslr/liveview/stop`, { method: "POST" }).catch(() => {}); };
+  }, [lvTest]);
+
+  // Pesan jelas di samping tombol (dulu error hanya muncul di kartu "Webcam" yang sering tidak terlihat -> tombol terasa mati).
+  const [pvMsg, setPvMsg] = useState(null);
+  const [starting, setStarting] = useState(false);
+  function explainCamErr(e) {
+    const n = e?.name || "";
+    if (n === "NotAllowedError" || n === "SecurityError" || n === "NotSupportedError") return "Akses kamera ditolak. Izinkan kamera untuk aplikasi/browser ini (Windows: Pengaturan > Privasi > Kamera, aktifkan untuk aplikasi desktop).";
+    if (n === "NotFoundError" || n === "OverconstrainedError") return "Kamera webcam / capture card tidak ditemukan. Cek kabel USB, lalu klik 'Deteksi ulang' dan pilih perangkatnya di Webcam Video Input. Kamera DSLR/mirrorless tidak terbaca di sini — pakai bagian KAMERA DSLR di bawah (Uji live view).";
+    if (n === "NotReadableError" || n === "AbortError") return "Kamera sedang dipakai program lain atau macet. Tutup digiCamControl, Canon EOS Utility, Zoom/OBS, dan tab/jendela lain yang memakai kamera; kalau masih gagal cabut-pasang kabel USB-nya.";
+    if (n === "TimeoutError") return "Kamera tidak menjawab dalam 12 detik (biasanya perangkat sedang dipakai program lain, atau driver capture card macet). Tutup program yang memakai kamera, cabut-pasang USB, lalu coba lagi.";
+    return `Pratinjau gagal: ${e?.message || n || "alasan tidak diketahui"}.`;
+  }
+  async function startPreview() {
+    stopPreview(); setPvMsg(null);
+    if (!navigator.mediaDevices?.getUserMedia) { setPvMsg("Akses kamera tidak tersedia di sini (butuh halaman https atau localhost)."); return; }
+    setStarting(true);
+    const [w, h] = RES[c.resolution] ?? RES[2];
+    const dev = c.videoDeviceId ? { deviceId: { ideal: c.videoDeviceId } } : {};
+    // Percobaan 2 tanpa tuntutan resolusi: sebagian capture card / webcam macet atau menolak resolusi tinggi
+    const attempts = [{ video: { ...dev, width: { ideal: w }, height: { ideal: h } } }, { video: c.videoDeviceId ? dev : true }];
+    let stream = null, lastErr = null;
+    for (const constraints of attempts) {
+      try {
+        stream = await new Promise((resolve, reject) => {
+          let late = false;
+          const t = setTimeout(() => { late = true; const e = new Error("timeout"); e.name = "TimeoutError"; reject(e); }, 12000);
+          navigator.mediaDevices.getUserMedia(constraints).then((st) => { clearTimeout(t); if (late) st.getTracks().forEach((x) => x.stop()); else resolve(st); }, (e) => { clearTimeout(t); if (!late) reject(e); });
+        });
+        break;
+      } catch (e) { lastErr = e; if (["NotAllowedError", "SecurityError", "NotFoundError", "NotSupportedError", "TimeoutError"].includes(e.name)) break; } // percobaan ke-2 hanya untuk kegagalan resolusi / perangkat sibuk
+    }
+    setStarting(false);
+    if (!stream) { setPvMsg(explainCamErr(lastErr)); return; }
+    streamRef.current = stream;
+    setPreviewing(true);
+    requestAnimationFrame(() => { if (videoRef.current) videoRef.current.srcObject = stream; });
+  }
+  function stopPreview() { streamRef.current?.getTracks().forEach((t) => t.stop()); streamRef.current = null; setPreviewing(false); }
+  useEffect(() => stopPreview, []);
+
+  const lv = c.liveView;
+  // Pratinjau memakai komponen LiveView yang SAMA dengan layar booth (putar, cermin, kecerahan, kontras, warna, filter, bingkai) dengan nilai pengaturan
+  // yang sedang diedit (belum disimpan). Sumbernya: webcam (aliran sendiri) atau live view DSLR (aliran MJPEG backend).
+  const [pvDims, setPvDims] = useState({ w: 0, h: 0 });
+  const pvRot = effectiveRotation(lv.rotation || 0, c.orientation, pvDims.w, pvDims.h);
+  const liveGain = lv.asIs === true ? 1 : (lv.brightness ?? 100) / 100;
+  const templateFrame = (lv.frameMode ?? (lv.fitTemplate ? "template" : "camera")) === "template";
+  const setDims = (w, h) => { if (w && h) setPvDims((d) => (d.w === w && d.h === h ? d : { w, h })); };
+  const webcamCam = {
+    isDslr: false, liveGain,
+    attachVideo: (el) => {
+      videoRef.current = el;
+      if (el) el.onloadedmetadata = () => setDims(el.videoWidth, el.videoHeight);
+      if (el && streamRef.current && el.srcObject !== streamRef.current) el.srcObject = streamRef.current;
+    },
+  };
+  const dslrCam = { isDslr: true, liveGain, attachImg: (el) => { if (el) el.onload = () => setDims(el.naturalWidth, el.naturalHeight); }, previewFrame: lvSrc, reopen: () => {} };
+  const pvBox = (cam) => (
+    <div className="relative bg-black w-[360px] h-[240px]" style={{ containerType: "size" }}>
+      <LiveView camera={cam} cfgOverride={c} aspect={3 / 4} crop={templateFrame} fill guide={templateFrame ? null : 3 / 4} />
+    </div>
+  );
+
+  return (
+    <>
+      {vis("CAMERA") && (
+      <Card title="CAMERA">
+        <Row label="Sumber kamera" hint="Webcam = kamera yang terbaca browser. DSLR / mirrorless (Canon, Nikon, dll lewat USB) memakai program digiCamControl — jalan di Chrome maupun aplikasi .exe.">
+          <Select value={c.mode} onChange={(v) => set(["camera", "mode"], v)} options={[["webcam", "Webcam / kamera USB (browser)"], ["dslr", "Kamera DSLR / mirrorless (Canon, Nikon, dll via digiCamControl)"]]} className="max-w-md" />
+        </Row>
+        {c.mode === "dslr" && (
+          <Row label="Sumber tampilan Live" hint="Kamera (USB) = live view lewat kabel USB: praktis tapi ada jeda, apalagi kalau ISO tinggi / shutter lambat. Webcam / HDMI = tampilan live dari perangkat video (kamera ke capture card HDMI, atau webcam) yang nyaris tanpa jeda; FOTO tetap dijepret DSLR lewat USB. Pilih perangkatnya di 'Webcam Video Input'. Catatan: HDMI biasanya 16:9 sedangkan foto 3:2, jadi bingkai live bisa sedikit beda dari hasil foto.">
+            <Select value={c.liveSource ?? "camera"} onChange={(v) => set(["camera", "liveSource"], v)} options={[["camera", "Kamera (USB live view)"], ["webcam", "Webcam / capture card HDMI (rendah delay)"]]} className="max-w-md" />
+          </Row>
+        )}
+        <Row label="Orientasi kamera" hint="Otomatis = ikut bentuk gambar kamera. Pilih Portrait kalau kamera dipasang tegak (gambar diputar 90° otomatis; kalau terbalik, ubah Rotation di bawah jadi 180°), atau Landscape untuk kebalikannya. Berlaku juga ke hasil foto.">
+          <Select value={c.orientation ?? "auto"} onChange={(v) => set(["camera", "orientation"], v)} options={[["auto", "Otomatis (ikut gambar kamera)"], ["landscape", "Landscape (melebar)"], ["portrait", "Portrait (tegak)"]]} className="max-w-xs" />
+        </Row>
+        <Row label="Auto Trigger Camera"><Check checked={c.autoTrigger} onChange={(v) => set(["camera", "autoTrigger"], v)} label="Jepret otomatis saat hitung mundur selesai" hint="Kalau dimatikan, tamu harus menekan tombol rana setelah hitung mundur." /></Row>
+        <Row label="Webcam Resolution" hint={RES_LABEL[c.resolution]}>
+          <div className="flex items-center gap-3 pt-1.5 text-[12px] text-[#55606E]">
+            Faster Framerate
+            <input type="range" className="w-56" min={0} max={3} value={c.resolution} onChange={(e) => set(["camera", "resolution"], Number(e.target.value))} />
+            Higher Quality
+          </div>
+        </Row>
+        <Row label="Webcam Video Input" hint="Kosong = kamera bawaan. Nama perangkat baru terbaca setelah izin kamera diberikan.">
+          <div className="flex gap-2">
+            <Select value={c.videoDeviceId} onChange={(v) => set(["camera", "videoDeviceId"], v)} options={[["", "(Otomatis)"], ...devices.video]} />
+            <Btn onClick={detect}>Deteksi ulang</Btn>
+          </div>
+        </Row>
+        <Row label="Webcam Audio Input" hint="Dipakai mode Video kalau perekaman suara diaktifkan di kelompok GIF, Live & Video.">
+          <Select value={c.audioDeviceId} onChange={(v) => set(["camera", "audioDeviceId"], v)} options={[["", "(Otomatis)"], ...devices.audio]} />
+        </Row>
+        {msg && <div className="mt-2"><Notice tone="warn">{msg}</Notice></div>}
+      </Card>)}
+
+      {vis("KAMERA DSLR / MIRRORLESS") && c.mode === "dslr" && (
+        <Card title="KAMERA DSLR / MIRRORLESS" hint="Kamera seperti Canon EOS & Nikon muncul di Windows sebagai 'Portable Devices', jadi tidak terbaca browser. POPSNAP memakai digiCamControl (gratis) sebagai penghubung.">
+          <Row label="Penghubung kamera" hint="digiCamControl = aplikasi gratis terpisah. Canon / Nikon / Sony SDK = program perantara resmi pabrikan, sudah ikut terpasang di aplikasi. Pilih lalu Simpan.">
+            <Select value={d.driver ?? "digicam"} onChange={(v) => set(["camera", "dslr", "driver"], v)} options={[["digicam", "digiCamControl"], ["canon", "Canon SDK (EDSDK)"], ["nikon", "Nikon SDK"], ["sony", "Sony SDK (Camera Remote)"]]} className="max-w-xs" />
+            {d.driver === "nikon" && (
+              <div className="mt-2 flex gap-2 flex-wrap">
+                <Select value={d.model ?? ""} onChange={(v) => set(["camera", "dslr", "model"], v)} options={[["", "(pilih model Nikon)"], ...["D500", "D5000", "D5100", "D5200", "D5300", "D5500", "D5600", "D600", "D610", "D700", "D7000", "D7100", "D7200", "D750", "D7500", "D780", "D800", "D810", "D850", "Z_SERIES"].map((m) => [m, m === "Z_SERIES" ? "Z series (Z6, Z7, ...)" : m])]} className="max-w-xs" />
+                {d.model === "Z_SERIES" && <input className="px-2.5 py-1.5 border border-[#C7D0DA] rounded text-[13px] w-40" placeholder="Model Z, mis. Z6" value={d.zModel ?? ""} onChange={(e) => set(["camera", "dslr", "zModel"], e.target.value)} />}
+              </div>
+            )}
+          </Row>
+          <Row label="Status">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${dslr?.online ? "bg-[#E6F6EE] text-[#0F5C52]" : "bg-[#FDE8EA] text-[#8A1C2B]"}`}>{dslr == null ? "Memeriksa…" : dslr.driver && dslr.driver !== "digicam" ? (dslr.sdkError ? "SDK belum tersambung" : "Kamera tersambung (SDK)") : dslr.online ? "digiCamControl tersambung" : "digiCamControl tidak terdeteksi"}</span>
+              <Btn onClick={detectDslr} disabled={dslrBusy}>{dslrBusy ? "Mencari…" : "Deteksi kamera"}</Btn>
+            </div>
+            {dslr?.sdkError && <div className="mt-2"><Notice tone="warn">{dslr.sdkError}{dslr.sdk?.lines?.length ? ` — Log: ${dslr.sdk.lines.slice(-6).join(" | ")}` : ""}</Notice></div>}
+            {dslr && !dslr.online && !dslr.driver && <div className="mt-2"><Notice tone="warn">{dslr.error || "Tidak ada jawaban."} Pasang digiCamControl, jalankan, lalu aktifkan Settings › Webserver › “Use web server” (port 5513).{dslr.tried?.length ? ` Percobaan: ${dslr.tried.join(" | ")}` : ""}</Notice></div>}
+          </Row>
+          <Row label="Kamera yang dipakai" hint="Kosong = kamera yang sedang aktif di digiCamControl. Kalau Canon & Nikon tersambung bersamaan, pilih salah satu.">
+            <div className="flex gap-2 flex-wrap">
+              <Select value={d.camera} onChange={(v) => set(["camera", "dslr", "camera"], v)} options={[["", "(Otomatis)"], ...(dslr?.cameras ?? []).map((n) => [n, n]), ...(d.camera && !(dslr?.cameras ?? []).includes(d.camera) ? [[d.camera, d.camera]] : [])]} className="max-w-md" />
+            </div>
+            {dslr?.online && dslr.cameras.length === 0 && <div className="mt-2"><Notice tone="warn">Belum ada kamera terbaca. Nyalakan kamera, set ke mode manual/foto, sambungkan USB, lalu klik Deteksi. Terbaca di digiCamControl = terbaca di sini.{dslr.raw ? ` (balasan: ${dslr.raw.slice(0, 120)})` : ""}</Notice></div>}
+          </Row>
+          <Row label="Alamat digiCamControl" hint="Bawaan http://localhost:5513 (PC yang sama). Ubah hanya kalau digiCamControl ada di PC lain.">
+            <input className="w-full max-w-md px-2.5 py-1.5 border border-[#C7D0DA] rounded text-[13px]" value={d.host} onChange={(e) => set(["camera", "dslr", "host"], e.target.value)} />
+          </Row>
+          <Row label="Uji jepret" hint="Memotret satu foto lewat digiCamControl dan menampilkannya di sini. Kalau gagal, pesan error-nya menunjukkan penyebabnya.">
+            <Btn disabled={shot?.busy} onClick={async () => {
+              setShot({ busy: true });
+              try {
+                const r = await fetch(`${API_BASE}/api/camera/dslr/capture`, { method: "POST" });
+                const j = await r.json().catch(() => ({}));
+                setShot(r.ok && j.image ? { image: j.image } : { error: j.error || `Gagal (HTTP ${r.status})` });
+              } catch (e) { setShot({ error: `Backend tidak terjangkau: ${e.message}` }); }
+            }}>{shot?.busy ? "Memotret…" : "Jepret sekarang"}</Btn>
+            {shot?.error && <div className="mt-2"><Notice tone="warn">{shot.error}</Notice></div>}
+            {shot?.image && <img src={shot.image} alt="hasil tes jepret" className="mt-2 max-w-[360px] max-h-[240px] border border-[#C7D0DA]" />}
+          </Row>
+          <Row label="Uji live view" hint="Menampilkan live view kamera lewat POPSNAP. Jendela live view digiCamControl akan terbuka di layar PC — geser ke monitor lain / minimalkan.">
+            {!lvTest ? <Btn onClick={() => setLvTest(true)}>Nyalakan live view</Btn> : (
+              <div>
+                {lvSrc ? pvBox(dslrCam) : <div className="bg-black w-[360px] h-[240px] flex items-center justify-center text-white/70 text-[12px]">Menunggu live view…</div>}
+                {lvStale && <div className="mt-2 max-w-xl"><Notice tone="warn">Belum ada gambar dari kamera setelah 8 detik. {dslr?.sdkError || dslr?.error || ""} Cek: kamera menyala dan di mode foto/manual, kabel USB tersambung, penghubung (digiCamControl / SDK) berjalan, dan program lain (EOS Utility, digiCamControl) tidak sedang memegang kamera. Klik "Deteksi kamera" di atas untuk melihat statusnya.</Notice></div>}
+                <div className="mt-2 flex items-center gap-3"><Btn onClick={() => { setLvTest(false); setLvSrc(null); }}>Matikan live view</Btn>{lvFps != null && <span className="text-[12px] text-[#55606E]">Kecepatan: <b>{lvFps}</b> frame/detik{lvFps > 0 && lvFps < 10 ? " (rendah — dari kamera/USB, bukan layar)" : ""}</span>}</div>
+              </div>
+            )}
+          </Row>
+          <Notice tone="info">Atur kualitas foto kamera ke JPEG (bukan RAW saja). Live view DSLR lewat USB sekitar 10–25 fps; foto hasil jepret tetap resolusi penuh.</Notice>
+        </Card>
+      )}
+
+      {vis("LIVE VIEW") && (
+      <Card title="LIVE VIEW" hint="Tampilan kamera saat hitung mundur. Auto cahaya LIVE VIEW (Samakan dengan foto, Auto Exposure) diatur di sini; auto cahaya FOTO ada di kartu AUTO CAHAYA FOTO di bawah.">
+        <Row label="Enable"><Check checked={lv.enabled} onChange={(v) => set(["camera", "liveView", "enabled"], v)} label="Tampilkan video pratinjau saat hitung mundur" /></Row>
+        <Row label="Mirror Image"><Check checked={lv.mirror} onChange={(v) => set(["camera", "liveView", "mirror"], v)} label="Pilihan awal: Mirror (seperti cermin). Tamu bisa memilih Mirror / No Mirror sendiri saat sesi foto & di editor" /></Row>
+        <Row label="Bentuk bingkai" hint="Ikut kamera: bingkai mengikuti Orientasi & Rotasi kamera, seluruh pandangan kamera tampil, bagian di luar slot digelapkan (lihat Area template). Ikut slot template: bingkai berbentuk slot foto, yang terlihat = yang tercetak (sisi yang tidak masuk slot terpotong). Penuhi area layar: kotak memakai seluruh ruang yang tersedia di layar portrait/persegi (kamera landscape dipotong di kiri-kanan; tanpa penanda area template).">
+          <Select value={lv.frameMode ?? (lv.fitTemplate ? "template" : "camera")} onChange={(v) => set(["camera", "liveView", "frameMode"], v)} options={[["camera", "Ikut kamera (portrait / landscape kamera)"], ["template", "Ikut slot template (yang terlihat = yang tercetak)"], ["screen", "Penuhi area layar (layar portrait: kotak lebih tinggi)"]]} className="max-w-md" />
+        </Row>
+        <Row label="Bentuk thumbnail foto" hint="Kotak foto kecil (1-8) di layar sesi & pratinjau akhir. HANYA tampilan: foto asli tidak diubah, hasil akhir tetap dipotong oleh template. Rasio slot (bawaan): kotak berbentuk slot pertama. Rasio + bentuk slot: foto ikut dipotong lingkaran / bintang / sudut membulat seperti slot template. Tiap kotak ikut slotnya sendiri: untuk template yang slotnya berbeda-beda. Foto utuh + bingkai: seluruh foto terlihat, bingkai putih menandai bagian yang masuk slot. Foto utuh: tanpa potong. Posisi & zoom dari Editor tidak ikut (tampilan memakai posisi awal di tengah).">
+          <Select value={lv.thumbMode ?? "ratio"} onChange={(v) => set(["camera", "liveView", "thumbMode"], v)} options={[["ratio", "Rasio slot (bawaan)"], ["shape", "Rasio + bentuk slot (lingkaran / bintang / membulat)"], ["each", "Tiap kotak ikut slotnya sendiri"], ["frame", "Foto utuh + bingkai area potongan"], ["whole", "Foto utuh (tanpa potong)"]]} className="max-w-md" />
+        </Row>
+        <Row label="Live view apa adanya"><Check checked={lv.asIs === true} onChange={(v) => set(["camera", "liveView", "asIs"], v)} label="Tampilkan live view persis dari kamera (seperti dslrBooth)" hint="Mematikan gamma/kecerahan, Samakan dengan foto, dan Auto Exposure sekaligus. Gambar lebih bersih (tidak pecah/berbintik) tapi mengikuti eksposur kamera, jadi bisa gelap bila setelan untuk flash. Atur terang dengan lampu atau menu Tools → Setelan Kamera." /></Row>
+        <Row label="Kecerahan live view"><div className="flex items-center gap-3 flex-wrap"><div className="w-28"><NumInput value={lv.brightness ?? 100} min={10} onCommit={(v) => set(["camera", "liveView", "brightness"], Math.round(Math.min(1000, Math.max(10, v))))} /></div><span className="text-[12px] text-[#55606E]">% (bebas, 10–1000; 100 = apa adanya). Hanya tampilan & video Live; foto tidak berubah. Rekomendasi: Canon 100 (dengan Auto Exposure aktif); Nikon 100–130 (naikkan bila masih gelap, mulai dari 120).</span></div></Row>
+        <Row label="Profil warna live view" hint="Hanya tampilan (foto tidak berubah). Operasi ini tidak menguatkan noise, jadi lebih bersih daripada menaikkan kecerahan. Pakai preset sebagai titik awal, lalu sesuaikan dengan melihat live view dan hasil foto berdampingan.">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Select value="" onChange={(v) => { const P = { d7100: [95, 120, 8], c1100: [100, 108, 4], c3000: [100, 108, 4], netral: [100, 100, 0] }[v]; if (P) { set(["camera", "liveView", "contrast"], P[0]); set(["camera", "liveView", "saturation"], P[1]); set(["camera", "liveView", "warmth"], P[2]); } }} options={[["", "Preset…"], ["d7100", "Nikon D7100 (dicocokkan dengan contoh foto)"], ["c1100", "Canon EOS 1100D (perkiraan, belum ada contoh)"], ["c3000", "Canon EOS 3000D (perkiraan, sama dengan 1100D, belum ada contoh)"], ["netral", "Netral (apa adanya)"]]} className="max-w-xs" />
+            <span className="text-[12px] text-[#55606E]">Kontras</span><div className="w-20"><NumInput value={lv.contrast ?? 100} min={50} onCommit={(v) => set(["camera", "liveView", "contrast"], Math.round(Math.min(160, Math.max(50, v))))} /></div>
+            <span className="text-[12px] text-[#55606E]">Saturasi</span><div className="w-20"><NumInput value={lv.saturation ?? 100} min={0} onCommit={(v) => set(["camera", "liveView", "saturation"], Math.round(Math.min(200, Math.max(0, v))))} /></div>
+            <span className="text-[12px] text-[#55606E]">Hangat (-30…30)</span><div className="w-20"><NumInput value={lv.warmth ?? 0} min={-30} onCommit={(v) => set(["camera", "liveView", "warmth"], Math.round(Math.min(30, Math.max(-30, v))))} /></div>
+          </div>
+        </Row>
+        <Row label="Filter live view" hint="Hanya tampilan live view (foto tidak berubah). Pilih dari daftar di Pengaturan > Filter; filter LUT (.cube) tidak tersedia di sini. Pilih &quot;Tanpa filter&quot; untuk mematikan.">
+          <Select value={lv.filterId || ""} onChange={(v) => set(["camera", "liveView", "filterId"], v)} options={[["", "Tanpa filter"], ...(s.editor?.filters ?? DEFAULT_FILTERS).filter((f) => f.enabled !== false && !f.lut?.url).map((f) => [f.id, f.label])]} className="max-w-xs" />
+        </Row>
+        <Row label="Samakan dengan foto"><Check checked={lv.autoBright !== false} onChange={(v) => set(["camera", "liveView", "autoBright"], v)} label="Otomatis cocokkan kecerahan live view dengan hasil jepret" hint="Dihitung dari perbandingan foto dengan live view tiap kali jepret (berlaku untuk semua kamera, termasuk yang memakai flash/strobo). Makin sering jepret makin pas." /></Row>
+        <Row label="Auto Exposure (Canon/Nikon)"><div className="flex items-center gap-3 flex-wrap"><Check checked={lv.canonAutoExposure !== false} onChange={(v) => set(["camera", "liveView", "canonAutoExposure"], v)} label="Terangkan live view di kamera (seperti Canon Auto Exposure di dslrBooth)" /><div className="w-20"><NumInput value={lv.canonBoost ?? 3} min={0} onCommit={(v) => set(["camera", "liveView", "canonBoost"], Math.round(Math.min(6, v)))} /></div><span className="text-[12px] text-[#55606E]">stop (0–6; 3 = 8x lebih terang)</span></div><div className="text-[12px] text-[#55606E] mt-1">Catatan: menaikkan ISO membuat live view berbintik. Kalau bisa, tambah cahaya studio dan matikan opsi ini. Selama live view, kamera menaikkan ISO / memperlambat shutter sementara supaya preview terang walau setelan foto untuk flash. Sebelum jepret setelan asli kamera dikembalikan otomatis, jadi hasil foto tidak berubah. Canon: mode Manual (M), ISO angka (bukan Auto); Nikon: hanya ISO yang dinaikkan (maks 6400), jadi pakai 2–3 stop. Perlu build ulang popsnap_canon_bridge.exe / popsnap_nikon_bridge.exe.</div></Row>
+        <Row label="Area template"><Check checked={lv.guide !== false} onChange={(v) => set(["camera", "liveView", "guide"], v)} label="Gelapkan bagian kamera yang tidak masuk ke slot foto template" hint="Bagian terang = yang akan tercetak di template; bagian gelap = terpotong." /></Row>
+        <Row label="Rotation" hint="Untuk kamera yang dipasang miring/portrait. Berlaku juga ke hasil foto.">
+          <Select value={String(lv.rotation)} onChange={(v) => set(["camera", "liveView", "rotation"], Number(v))} options={[["0", "0 derajat"], ["90", "90 derajat"], ["180", "180 derajat"], ["270", "270 derajat"]]} className="max-w-xs" />
+        </Row>
+        <Row label="Putar hasil Live / GIF" hint="Putaran tambahan khusus klip Live dan GIF (tidak mengubah tampilan live di layar maupun foto). Pakai kalau hasil Live/GIF terbalik padahal tampilan live sudah benar.">
+          <Select value={String(lv.clipRotation ?? 0)} onChange={(v) => set(["camera", "liveView", "clipRotation"], Number(v))} options={[["0", "0 derajat (ikut Rotation)"], ["90", "+90 derajat"], ["180", "+180 derajat (balik)"], ["270", "+270 derajat"]]} className="max-w-xs" />
+        </Row>
+        <Row label="Display on Start Screen"><Check checked={lv.displayOnStart} onChange={(v) => set(["camera", "liveView", "displayOnStart"], v)} label="Tampilkan live view sebagai latar layar Start" hint="Kamera menyala terus selama layar Start tampil." /></Row>
+
+        <Row label="Uji kamera" hint="Pratinjau memakai pengaturan di atas (perangkat, resolusi, mirror, rotasi) sebelum disimpan.">
+          {!previewing ? <div><Btn onClick={startPreview} disabled={starting}>{starting ? "Menyalakan…" : "Nyalakan pratinjau"}</Btn>{pvMsg && <div className="mt-2 max-w-xl"><Notice tone="warn">{pvMsg}</Notice></div>}</div> : (
+            <div>
+              {pvBox(webcamCam)}
+              <div className="mt-2 flex items-center gap-3"><Btn onClick={stopPreview}>Matikan pratinjau</Btn><span className="text-[12px] text-[#55606E]">Putar {pvRot}°{lv.mirror ? " · mirror" : ""}{templateFrame ? " · bingkai ikut slot (contoh 3:4)" : " · kotak putih = area template (contoh 3:4)"}</span></div>
+            </div>
+          )}
+        </Row>
+      </Card>
+      )}
+
+      {vis("PROFIL KAMERA") && (
+      <Card title="PROFIL KAMERA" hint="Salin HANYA pengaturan kamera ke PC booth lain (atau simpan cadangan): live view, auto cahaya live & foto, ISO / shutter / aperture / WB, orientasi, dll. Pengaturan lain (pembayaran, printer, template) dan pilihan webcam / DSLR PC ini tidak ikut.">
+        <Row label="Ekspor / Impor">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Btn onClick={exportCamera}>Ekspor pengaturan kamera</Btn>
+            <Btn onClick={() => profRef.current?.click()}>Impor pengaturan kamera</Btn>
+            <input ref={profRef} type="file" accept="application/json,.json" onChange={importCamera} className="hidden" aria-label="Berkas pengaturan kamera" />
+          </div>
+          {profMsg?.ok && <div className="mt-2"><Notice tone="ok">{profMsg.ok}</Notice></div>}
+          {profMsg?.err && <div className="mt-2"><Notice tone="error">{profMsg.err}</Notice></div>}
+        </Row>
+      </Card>
+      )}
+
+      {vis("AUTO CAHAYA FOTO") && (
+      <Card title="AUTO CAHAYA FOTO" hint="Penyesuaian terang/gelap untuk HASIL FOTO. Terpisah dari live view: auto cahaya live view diatur di kartu LIVE VIEW di atas (Samakan dengan foto, Auto Exposure).">
+        <Row label="Auto cahaya foto"><Check checked={c.photoLight?.auto === true} onChange={(v) => set(["camera", "photoLight", "auto"], v)} label="Otomatis terangkan / gelapkan foto hasil jepret ke target" hint="Setelah jepret, booth mengukur kecerahan bagian tengah foto (tempat wajah) lalu menggeser kecerahannya ke target. Hanya membantu selisih kecil (mis. siang vs malam); foto yang sangat gelap atau terbakar tidak bisa dipulihkan. Berlaku untuk foto yang tersimpan, layar cek foto, hasil cetak, dan Live / GIF yang dibuat dari foto itu." /></Row>
+        {c.photoLight?.auto === true && (<>
+          <Row label="Target terang"><div className="flex items-center gap-3 flex-wrap"><div className="w-28"><NumInput value={c.photoLight?.target ?? 120} min={60} onCommit={(v) => set(["camera", "photoLight", "target"], Math.round(Math.min(200, Math.max(60, v))))} /></div><span className="text-[12px] text-[#55606E]">0-255 (bawaan 120). Naikkan bila hasil umumnya masih gelap, turunkan bila terlalu terang.</span></div></Row>
+          <Row label="Maksimal koreksi"><div className="flex items-center gap-3 flex-wrap"><div className="w-28"><NumInput value={c.photoLight?.maxPct ?? 40} min={0} onCommit={(v) => set(["camera", "photoLight", "maxPct"], Math.round(Math.min(100, Math.max(0, v))))} /></div><span className="text-[12px] text-[#55606E]">% (bawaan 40). Batas supaya warna kulit tidak pucat / gosong. 0 = tidak ada koreksi.</span></div></Row>
+        </>)}
+      </Card>)}
+    </>
+  );
+}

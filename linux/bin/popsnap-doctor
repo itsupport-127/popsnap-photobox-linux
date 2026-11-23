@@ -1,0 +1,55 @@
+#!/bin/sh
+# Cek cepat apakah PC ini siap jadi booth POPSNAP. Hanya membaca, tidak mengubah apa pun.
+APP="${POPSNAP_HOME:-/opt/popsnap}"
+[ -r /etc/popsnap/popsnap.conf ] && . /etc/popsnap/popsnap.conf
+: "${POPSNAP_DATA:=/var/lib/popsnap}"; : "${PORT:=4000}"
+FAIL=0; WARN=0
+ok()   { printf '  [ OK ] %s\n' "$1"; }
+warn() { printf '  [WARN] %s\n' "$1"; WARN=$((WARN+1)); }
+bad()  { printf '  [GAGAL] %s\n' "$1"; FAIL=$((FAIL+1)); }
+
+echo "POPSNAP doctor"
+NODE="$APP/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
+if [ -z "$NODE" ]; then bad "Node.js tidak ditemukan"
+else
+  v="$("$NODE" -v 2>/dev/null)"
+  if "$NODE" -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=5)?0:1)' 2>/dev/null; then ok "Node $v"; else bad "Node $v terlalu lama (butuh 22.5+)"; fi
+  "$NODE" -e 'require("node:sqlite")' 2>/dev/null && ok "SQLite bawaan Node tersedia" || bad "node:sqlite tidak tersedia"
+fi
+
+[ -f "$APP/backend/server.js" ] && ok "Aplikasi terpasang di $APP ($(cat "$APP/VERSION" 2>/dev/null))" || bad "Berkas aplikasi tidak ada di $APP"
+[ -f "$APP/frontend/index.html" ] && ok "Tampilan booth (frontend) ada" || bad "Frontend belum ada (build belum dimasukkan)"
+
+if [ -d "$POPSNAP_DATA" ]; then
+  owner="$(stat -c %U "$POPSNAP_DATA" 2>/dev/null)"
+  if [ -w "$POPSNAP_DATA" ] || [ "$owner" = "popsnap" ]; then ok "Folder data $POPSNAP_DATA"; else warn "Folder data $POPSNAP_DATA bukan milik user popsnap / tidak bisa ditulis"; fi
+  free="$(df -Pk "$POPSNAP_DATA" 2>/dev/null | awk 'NR==2{print int($4/1024/1024)}')"
+  [ -n "$free" ] && { [ "$free" -ge 5 ] && ok "Ruang kosong ${free} GB" || warn "Ruang kosong tinggal ${free} GB (foto bisa gagal tersimpan)"; }
+  [ -f "$POPSNAP_DATA/.env" ] && { m="$(stat -c %a "$POPSNAP_DATA/.env")"; [ "$m" = "600" ] && ok ".env izin 600" || warn ".env izin $m (sebaiknya: chmod 600 $POPSNAP_DATA/.env)"; }
+else warn "Folder data $POPSNAP_DATA belum ada (dibuat saat layanan pertama jalan)"; fi
+
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  systemctl is-active --quiet popsnap && ok "Layanan popsnap aktif" || bad "Layanan popsnap tidak aktif (sudo systemctl status popsnap)"
+  systemctl is-enabled --quiet popsnap 2>/dev/null && ok "Layanan popsnap menyala otomatis saat boot" || warn "Layanan belum diaktifkan saat boot (sudo systemctl enable popsnap)"
+fi
+if command -v curl >/dev/null 2>&1; then
+  curl -fsS -o /dev/null --max-time 5 "http://localhost:$PORT/api/settings/public" && ok "Backend menjawab di port $PORT" || bad "Backend tidak menjawab di http://localhost:$PORT"
+  curl -fsS --max-time 5 "http://localhost:$PORT/" 2>/dev/null | grep -qi "<html" && ok "Tampilan booth disajikan di http://localhost:$PORT/" || warn "Halaman utama tidak tersaji (POPSNAP_FRONTEND?)"
+else warn "curl tidak ada: cek port dilewati"; fi
+
+B=""; for b in "${CHROME_BIN:-}" google-chrome-stable google-chrome chromium chromium-browser; do [ -n "$b" ] && command -v "$b" >/dev/null 2>&1 && { B="$b"; break; }; done
+[ -n "$B" ] && ok "Browser: $B" || bad "Chrome/Chromium tidak ditemukan (untuk kiosk)"
+
+if ls /dev/video* >/dev/null 2>&1; then ok "Kamera: $(ls /dev/video* | tr '\n' ' ')"; else warn "Tidak ada /dev/video* (webcam tidak terdeteksi; kamera DSLR/Canon/Nikon via SDK tidak didukung di Linux)"; fi
+u="${SUDO_USER:-$(id -un)}"; id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx video && ok "User $u ada di grup video" || warn "User $u tidak ada di grup video (sudo usermod -aG video $u, lalu login ulang)"
+
+if command -v lpstat >/dev/null 2>&1; then
+  d="$(lpstat -d 2>/dev/null | sed 's/.*: //')"
+  case "$d" in ""|*"no system default"*) warn "Belum ada printer bawaan CUPS (cetak langsung butuh printer bawaan)";; *) ok "Printer bawaan: $d";; esac
+else warn "CUPS (lpstat) tidak ada: cetak belum bisa dicek"; fi
+
+ip="$(hostname -I 2>/dev/null | awk '{print $1}')"; [ -n "$ip" ] && ok "Alamat LAN $ip (dipakai di QR/link unduh)" || warn "Tidak ada alamat LAN (QR/link unduh tidak akan bisa dibuka dari HP)"
+if command -v timedatectl >/dev/null 2>&1; then timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -qx yes && ok "Jam tersinkron" || warn "Jam belum tersinkron (laporan shift & kedaluwarsa file bisa meleset)"; fi
+
+echo; echo "Hasil: $FAIL gagal, $WARN peringatan."
+[ "$FAIL" -eq 0 ]

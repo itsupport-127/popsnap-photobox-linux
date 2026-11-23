@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+  rm -f /usr/bin/popsnap-doctor /usr/bin/popsnap-kiosk
+  [ -d /run/systemd/system ] && systemctl daemon-reload || true
+fi
+# Data di /var/lib/popsnap TIDAK dihapus, bahkan saat purge (berisi database, foto, rahasia). Hapus manual kalau memang tidak dipakai.
+exit 0

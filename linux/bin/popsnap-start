@@ -1,0 +1,21 @@
+#!/bin/sh
+# Menjalankan backend POPSNAP (dipanggil systemd, boleh juga manual). Data TIDAK disimpan di folder aplikasi:
+#   data  : $POPSNAP_DATA     (bawaan /var/lib/popsnap)  -> database, upload, .env (rahasia), arsip
+#   pustaka: $POPSNAP_LIBRARY (bawaan $POPSNAP_DATA/library) -> Settings + Templates
+# Pengaturan bisa diubah di /etc/popsnap/popsnap.conf (dibaca systemd & skrip ini).
+set -eu
+APP="${POPSNAP_HOME:-/opt/popsnap}"
+[ -r /etc/popsnap/popsnap.conf ] && . /etc/popsnap/popsnap.conf
+: "${POPSNAP_DATA:=/var/lib/popsnap}"
+: "${POPSNAP_LIBRARY:=$POPSNAP_DATA/library}"
+: "${PORT:=4000}"
+: "${POPSNAP_FRONTEND:=$APP/frontend}"
+export POPSNAP_DATA POPSNAP_LIBRARY PORT POPSNAP_FRONTEND
+
+NODE="$APP/node/bin/node"
+[ -x "$NODE" ] || NODE="$(command -v node || true)"
+[ -n "$NODE" ] || { echo "POPSNAP: Node.js tidak ditemukan (butuh versi 22.5 atau lebih baru)." >&2; exit 127; }
+
+mkdir -p "$POPSNAP_DATA" "$POPSNAP_LIBRARY"
+cd "$APP/backend"
+exec "$NODE" server.js

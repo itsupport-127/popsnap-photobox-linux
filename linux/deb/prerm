@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+case "$1" in remove|deconfigure) systemctl stop popsnap 2>/dev/null || true; systemctl disable popsnap >/dev/null 2>&1 || true;; esac
+exit 0
