@@ -34,6 +34,7 @@ while [ "$i" -lt "${KIOSK_WAIT_TRIES:-45}" ]; do
   i=$((i+1)); sleep 2
 done
 
+pkill -u "$(id -u)" -f gvfs-gphoto2-volume-monitor 2>/dev/null   # jangan rebutan kamera USB dengan backend
 mkdir -p "$PROFILE"
 FLAGS="--kiosk --user-data-dir=$PROFILE --no-first-run --no-default-browser-check --noerrdialogs --disable-infobars
  --disable-session-crashed-bubble --disable-pinch --overscroll-history-navigation=0 --autoplay-policy=no-user-gesture-required

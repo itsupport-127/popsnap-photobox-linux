@@ -41,8 +41,22 @@ B=""; for b in "${CHROME_BIN:-}" google-chrome-stable google-chrome chromium chr
 [ -n "$B" ] && ok "Browser: $B" || bad "Chrome/Chromium tidak ditemukan (untuk kiosk)"
 case "$(readlink -f "$(command -v "$B" 2>/dev/null)" 2>/dev/null)" in /snap/*|*/snap/*) warn "Browser ini versi snap: kamera, folder profil, dan cetak sering bermasalah di mode kiosk. Pakai google-chrome-stable (.deb dari Google) atau Chromium non-snap.";; esac
 
-if ls /dev/video* >/dev/null 2>&1; then ok "Kamera: $(ls /dev/video* | tr '\n' ' ')"; else warn "Tidak ada /dev/video* (webcam tidak terdeteksi; kamera DSLR/Canon/Nikon via SDK tidak didukung di Linux)"; fi
+if ls /dev/video* >/dev/null 2>&1; then ok "Kamera: $(ls /dev/video* | tr '\n' ' ')"; else warn "Tidak ada /dev/video* (webcam tidak terdeteksi; ini normal kalau booth memakai DSLR lewat gPhoto2, lihat bagian bawah)"; fi
 u="${SUDO_USER:-$(id -un)}"; [ "$u" = root ] && ok "Cek grup video dilewati (dijalankan sebagai root; jalankan tanpa sudo sebagai user booth)" || id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx video && ok "User $u ada di grup video" || warn "User $u tidak ada di grup video (sudo usermod -aG video $u, lalu login ulang)"
+
+# Kamera DSLR/mirrorless lewat gPhoto2
+GP="${GPHOTO2_BIN:-$(command -v gphoto2 2>/dev/null)}"
+if [ -z "$GP" ] || [ ! -x "$GP" ]; then warn "gphoto2 belum terpasang (hanya perlu kalau booth memakai DSLR): sudo apt install gphoto2"
+else
+  ok "gphoto2: $("$GP" --version 2>/dev/null | head -n1)"
+  cams="$(LANG=C timeout 15 "$GP" --auto-detect 2>/dev/null | tail -n +3 | sed '/^$/d')"
+  if [ -n "$cams" ]; then ok "Kamera USB terdeteksi: $(echo "$cams" | head -n1 | sed 's/  *usb:.*//')"
+    pgrep -af 'gphoto2' | grep -v "doctor\|pgrep" | grep -q . && warn "Ada proses gphoto2 berjalan (kamera sedang dipakai backend; wajar kalau live view aktif)"
+    pgrep -f gvfs-gphoto2-volume-monitor >/dev/null 2>&1 && warn "gvfs-gphoto2-volume-monitor aktif: bisa merebut kamera. Login ulang, atau: pkill -f gvfs-gphoto2-volume-monitor"
+  else warn "gphoto2 tidak melihat kamera (hidupkan kamera, kabel USB, mode M; kalau baru dipasang cabut-colok)"; fi
+fi
+[ -e /etc/udev/rules.d/70-popsnap-camera.rules ] || [ -e /lib/udev/rules.d/70-popsnap-camera.rules ] && ok "Aturan udev kamera terpasang" || warn "Aturan udev kamera tidak ada (layanan popsnap bisa ditolak mengakses USB)"
+[ "$(readlink /etc/systemd/user/gvfs-gphoto2-volume-monitor.service 2>/dev/null)" = /dev/null ] && ok "gvfs kamera dimatikan (tidak rebutan USB)" || warn "gvfs-gphoto2-volume-monitor belum dimatikan (hanya perlu di desktop yang memakainya)"
 
 if command -v lpstat >/dev/null 2>&1; then
   d="$(lpstat -d 2>/dev/null | sed 's/.*: //')"

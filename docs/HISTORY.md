@@ -5,6 +5,22 @@ Terbaru di atas. Format entri: tanggal, repo, apa yang diubah, cara uji, status 
 
 ---
 
+## 2026-11-24 (3) | popsnap-photobox-linux | build-linux.bat untuk Windows
+- Ditambah `build-linux.bat` (Docker node:22-bookworm, cadangan WSL) + `linux/build-clean.sh` (salinan bersih, buang CRLF) + `.gitattributes` (LF untuk skrip Linux). Jalur skrip diuji di sandbox dengan salinan ber-CRLF (hasil .deb + tar.gz benar). **Belum diuji**: `.bat` itu sendiri di Windows, Docker Desktop, WSL.
+
+## 2026-11-24 (2) | popsnap-photobox-linux | Perintah build satu langkah
+- Ditambah `./build-linux.sh [versi]` di root repo (membungkus `linux/build-linux.sh`, yang sudah membuild frontend sendiri). Dicatat di README-LINUX.
+
+
+## 2026-11-24 | popsnap-photobox-linux | Kamera DSLR di Linux lewat gPhoto2
+- Alasan: paket Linux sebelumnya tidak punya kamera DSLR (SDK Canon/Nikon khusus Windows). Permintaan pemilik: kamera harus jalan di Linux.
+- Dibuat: `backend/gphotoBridge.js` (live view MJPEG dari `gphoto2 --stdout --capture-movie` dengan pemisah JPEG yang tahan thumbnail EXIF dan progressive; jepret dengan RAW+JPEG, coba ulang saat busy, pesan jelas untuk RAW saja; baca/ubah ISO, rana, aperture, WB, dial mode). `sdkBridge.js` dan `cameraBridge.js` memilihnya di Linux saja.
+- Paket: aturan udev, mask gvfs kamera, `Recommends: gphoto2`, doctor (gphoto2, kamera, udev, gvfs), variabel `GPHOTO_*` di `popsnap.conf`, README-LINUX bagian Kamera DSLR, kiosk mematikan gvfs monitor milik user.
+- Uji: `backend/test/gphoto-bridge.js` dan `gphoto-http.js` dengan `fake-gphoto2.js` (menegakkan aturan satu proses pegang USB). Semua 9 tes backend lulus. Profil Foto diterapkan sebelum jepret dan profil Live kembali sesudahnya; tidak ada proses gphoto2 yatim.
+- **Belum teruji**: kamera asli (live view Canon via gPhoto2, makna exposure, capture target), udev/gvfs di desktop asli, systemd asli. Kode setelan (iso/av/tv/wb) dibuat dari label, bukan kode EDSDK, jadi profil dari Windows tidak langsung identik.
+- Lanjutan yang disarankan: uji dengan kamera asli, catat model, lalu sesuaikan `GPHOTO_CAPTURE_TARGET` dan pemetaan setelan. Boost live view Canon tidak ada di gPhoto2.
+- Status: diserahkan sebagai zip dan paket .deb; push ke GitHub diblokir dari sandbox (403).
+
 ## 2026-11-23 (2) | popsnap-photobox-linux | Paket Linux: uji, perbaikan, dokumentasi
 Kerangka paket Linux (`linux/`) sudah ada dari sesi lain (kiosk Chrome, systemd, .deb, install.sh, doctor, `POPSNAP_FRONTEND`). Sesi ini **tidak membuat ulang**, hanya menguji dan memperbaiki.
 - Diuji nyata di sandbox Ubuntu 24.04: build `.deb` + `.tar.gz`; `dpkg -i` (pasang), update 1.0.0 -> 1.0.1 (database dicadangkan ke `/var/lib/popsnap/backup/sebelum-update-*`, data utuh), downgrade **ditolak** (deb dan tar), `dpkg -r` dan `install.sh --uninstall` (data tetap), layanan jalan sebagai user `popsnap`, `/`, `/admin`, rute React dilayani, `systemd-analyze verify` lulus, Chrome + webcam palsu: layar Start tampil dan `getUserMedia` jalan, tanpa error konsol.

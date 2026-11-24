@@ -7,7 +7,8 @@ Aplikasi desktop (.exe / Electron) tidak dipakai di Linux.
 
 ## Yang didukung / tidak
 - Didukung: webcam, template, QRIS, galeri, kasir, Remote, admin, cetak lewat CUPS.
-- **Tidak didukung:** kamera DSLR Canon/Nikon lewat SDK, digiCamControl, dslrBooth, cetak ke `\\PC\printer` (semua khusus Windows).
+- **DSLR/mirrorless:** lewat gPhoto2 (lihat bagian *Kamera DSLR* di bawah). Baru diuji dengan gphoto2 tiruan, belum dengan kamera asli.
+- **Tidak didukung:** SDK Canon/Nikon bawaan Windows, digiCamControl, dslrBooth, Canon Auto Exposure live view boost, cetak ke `\\PC\printer`.
 - Kunci layar penuh di Chrome tidak serapat aplikasi .exe (Esc bisa ditahan ±2 detik untuk keluar). Untuk kunci rapat, jalankan di sesi kiosk khusus.
 
 ## Pasang
@@ -61,3 +62,17 @@ Pengguna desktop booth sebaiknya masuk grup `video`: `sudo usermod -aG video NAM
 linux/build-linux.sh [--version 1.0.0] [--node /path/node]
 ```
 Hasil di `linux/dist/`. Node ikut dibundel; butuh Node 22.5+, npm, dpkg-deb.
+
+## Build
+Di mesin Linux (Node 22.5+): `./build-linux.sh 1.1.0` -> hasil di `linux/dist/` (.deb + .tar.gz + SHA256SUMS).
+
+## Build dari Windows
+`build-linux.bat 1.1.0` (butuh Docker Desktop, atau WSL dengan Node 22.5+ dan dpkg-deb). Memakai salinan bersih repo (tanpa node_modules Windows, CRLF dibersihkan). Hasil di `linux\dist\`.
+
+## Kamera DSLR (gPhoto2)
+1. `sudo apt install gphoto2` (paket .deb merekomendasikannya otomatis). Pemasang sudah memasang aturan udev dan mematikan gvfs kamera.
+2. Hidupkan kamera, kabel USB langsung ke PC (hindari hub), dial ke **M**, kualitas **JPEG** (RAW saja akan ditolak dengan pesan jelas).
+3. Cek: `gphoto2 --auto-detect` lalu `popsnap-doctor`. Kalau kamera tidak terbaca: cabut-colok USB.
+4. Di Pengaturan > kamera pilih driver DSLR seperti biasa; di Linux semuanya lewat gPhoto2.
+5. Beberapa variabel di `/etc/popsnap/popsnap.conf`: `GPHOTO_PORT`, `GPHOTO_CAMERA`, `GPHOTO_CAPTURE_TARGET`, `GPHOTO_KEEP`.
+6. Profil kamera (ISO/rana/aperture/WB) tetap bisa diatur, tapi nilainya diambil dari daftar pilihan kamera lewat gPhoto2 dan tidak sama persis dengan di Windows. Cek hasilnya di satu booth dulu.

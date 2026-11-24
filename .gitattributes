@@ -1,0 +1,8 @@
+*.sh text eol=lf
+linux/bin/* text eol=lf
+linux/deb/* text eol=lf
+*.service text eol=lf
+*.desktop text eol=lf
+*.rules text eol=lf
+linux/popsnap.conf text eol=lf
+*.bat text eol=crlf

@@ -32,14 +32,14 @@ echo "$VERSION" > "$APP/VERSION"
 BASE="popsnap-$VERSION-linux-$ARCH_DEB"
 echo "== tar.gz"
 T="$STAGE/$BASE"; mkdir -p "$T"; cp -a "$APP" "$T/app"
-cp "$L/install.sh" "$L/popsnap.conf" "$L/systemd/popsnap.service" "$L/xdg/popsnap-kiosk.desktop" "$L/README-LINUX.md" "$T/"
+cp "$L/install.sh" "$L/popsnap.conf" "$L/systemd/popsnap.service" "$L/xdg/popsnap-kiosk.desktop" "$L/udev/70-popsnap-camera.rules" "$L/README-LINUX.md" "$T/"
 chmod 755 "$T/install.sh"   # repo dari Windows: berkas tanpa izin eksekusi
 tar -C "$STAGE" -czf "$OUT/$BASE.tar.gz" "$BASE"
 
 echo "== .deb"
-D="$STAGE/deb"; mkdir -p "$D/DEBIAN" "$D/opt" "$D/etc/popsnap" "$D/lib/systemd/system" "$D/etc/xdg/autostart"
+D="$STAGE/deb"; mkdir -p "$D/DEBIAN" "$D/opt" "$D/etc/popsnap" "$D/lib/systemd/system" "$D/etc/xdg/autostart" "$D/lib/udev/rules.d"
 cp -a "$APP" "$D/opt/popsnap"
-cp "$L/popsnap.conf" "$D/etc/popsnap/popsnap.conf"; cp "$L/systemd/popsnap.service" "$D/lib/systemd/system/"; cp "$L/xdg/popsnap-kiosk.desktop" "$D/etc/xdg/autostart/"
+cp "$L/popsnap.conf" "$D/etc/popsnap/popsnap.conf"; cp "$L/systemd/popsnap.service" "$D/lib/systemd/system/"; cp "$L/xdg/popsnap-kiosk.desktop" "$D/etc/xdg/autostart/"; cp "$L/udev/70-popsnap-camera.rules" "$D/lib/udev/rules.d/"
 for f in preinst postinst prerm postrm; do sed "s/@VERSION@/$VERSION/g" "$L/deb/$f" > "$D/DEBIAN/$f"; chmod 755 "$D/DEBIAN/$f"; done
 echo /etc/popsnap/popsnap.conf > "$D/DEBIAN/conffiles"
 SIZE="$(du -sk "$D/opt" | cut -f1)"
@@ -50,7 +50,7 @@ Architecture: $ARCH_DEB
 Maintainer: POPSNAP IT <it@popsnap.local>
 Installed-Size: $SIZE
 Depends: adduser, curl
-Recommends: chromium | chromium-browser | google-chrome-stable, cups-client
+Recommends: gphoto2, chromium | chromium-browser | google-chrome-stable, cups-client
 Section: misc
 Priority: optional
 Description: POPSNAP photobooth (backend + tampilan booth, mode Chrome kiosk)

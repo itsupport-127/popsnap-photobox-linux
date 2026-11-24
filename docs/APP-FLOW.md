@@ -5,7 +5,7 @@ Disusun dari kode (bukan dari ingatan). Kalau kode berubah, perbarui bagian terk
 ## 1. Gambaran besar
 ```
 Layar booth (React, frontend/)  <--HTTP-->  Backend Node (backend/server.js, port 4000)  <--> SQLite + folder data
-      |                                           |-- kamera: webcam (browser) | DSLR via program perantara Windows (.exe)
+      |                                           |-- kamera: webcam (browser) | DSLR via program perantara Windows (.exe) atau gPhoto2 (Linux)
       |                                           |-- Remote Booth (poll ke popsnap-remote)
       |                                           |-- Galeri (unggah sesi ke popsnap-gallery)
       |                                           `-- Kasir (API key), Midtrans/DOKU (QRIS), cloud-dashboard (opsional)
@@ -73,6 +73,7 @@ Kasir: `CashierScreen.jsx`.
 | `db.js` | SQLite bawaan Node (`node:sqlite`), migrasi hanya menambah kolom |
 | `settings.js` | Skema + validasi ketat semua pengaturan (nilai tak valid kembali ke nilai sekarang), `load/update/forKiosk` |
 | `auth.js`, `activity.js` | Login, izin, log aktivitas |
+| `gphotoBridge.js` | Kamera DSLR di Linux: membungkus `gphoto2` (live view `--capture-movie`, jepret, baca/ubah setelan). Satu proses pemegang USB, antrean `exclusive()`. Tes: `test/gphoto-bridge.js`, `test/gphoto-http.js` (pakai `test/fixtures/fake-gphoto2.js`) |
 | `cameraBridge.js`, `nativeBridge.js`, `sdkBridge.js` | Kamera DSLR: program perantara Windows (`popsnap_canon_bridge.exe`, `popsnap_nikon_bridge.exe`, `*_sdk_bridge.exe`), exposure, live view |
 | `remoteAgent.js`, `remoteSpec.js` | Agen Remote: kirim pengaturan tiap 8 dtk, terima perintah. `remoteSpec.js` = salinan persis `popsnap-remote/src/spec.js` |
 | `gallerySync.js`, `sharePage.js` | Unggah ke galeri, halaman `/s/:token` |

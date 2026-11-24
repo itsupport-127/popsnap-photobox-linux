@@ -7,6 +7,10 @@ if [ "$1" = "configure" ]; then
   mkdir -p "$DATA"; chown -R popsnap:popsnap "$DATA"
   ln -sf /opt/popsnap/bin/popsnap-doctor /usr/bin/popsnap-doctor
   ln -sf /opt/popsnap/bin/popsnap-kiosk /usr/bin/popsnap-kiosk
+  # Kamera DSLR (gPhoto2): lepas dari gvfs desktop & muat ulang aturan udev
+  mkdir -p /etc/systemd/user; [ -e /etc/systemd/user/gvfs-gphoto2-volume-monitor.service ] || ln -s /dev/null /etc/systemd/user/gvfs-gphoto2-volume-monitor.service
+  command -v udevadm >/dev/null 2>&1 && { udevadm control --reload 2>/dev/null || true; udevadm trigger --subsystem-match=usb 2>/dev/null || true; }
+  command -v gphoto2 >/dev/null 2>&1 || echo "POPSNAP: gphoto2 belum terpasang (perlu untuk kamera DSLR): sudo apt install gphoto2" >&2
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
     systemctl enable popsnap >/dev/null 2>&1 || true

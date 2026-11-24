@@ -1,0 +1,2 @@
+# POPSNAP: beri layanan popsnap akses USB ke kamera DSLR/mirrorless yang dikenali libgphoto2.
+SUBSYSTEM=="usb", ENV{ID_GPHOTO2}=="1", GROUP="popsnap", MODE="0660"

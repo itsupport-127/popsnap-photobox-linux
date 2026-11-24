@@ -23,6 +23,7 @@ const isJpeg = (b) => b && b.length > 500 && b[0] === 0xff && b[1] === 0xd8;
 // Cari program perantara. File SDK ikut terpasang bersama aplikasi (backend/sdk/...), tapi folder instalasi
 // (Program Files) tidak bisa ditulisi, jadi pada pemakaian pertama disalin ke folder data (%AppData%\POPSNAP\sdk).
 function findDir(brand, model) {
+  if (process.platform === "linux") return require("./gphotoBridge").binary(); // Linux: yang dicari program gphoto2
   const exe = `${brand}_sdk_bridge.exe`;
   const sub = brand === "nikon" ? String(model || "").replace(/[^A-Za-z0-9_\-]/g, "") : "";
   const userBase = path.join(config.dataDir, "sdk", brand);
@@ -163,9 +164,12 @@ class SdkBridge {
 
 const bridges = {};
 const native = require("./nativeBridge");
+// Linux: semua merek (Canon / Nikon / Sony / lainnya) lewat gPhoto2; program perantara .exe hanya ada di Windows.
+const gphoto = process.platform === "linux" ? require("./gphotoBridge") : null;
 // Pakai program perantara buatan POPSNAP (popsnap_<merek>_bridge.exe, live view lebih lancar) bila ada; kalau tidak, program bawaan lama.
 // Kamera Nikon seri Z belum punya bridge buatan sendiri (pembungkus MAID3 hanya untuk seri D) -> pakai program bawaan.
 const get = (brand, model) => {
+  if (gphoto) return (bridges.gphoto = gphoto.instance());
   const z = brand === "nikon" && /^Z/i.test(String(model || ""));
   const key = z ? "nikon-z" : brand;
   const cur = bridges[key];

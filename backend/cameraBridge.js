@@ -63,7 +63,7 @@ function mount(app, { settingsStore, remoteTools, sessionActive }) {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const cfg = () => {
     const d = settingsStore.load().camera?.dslr ?? {};
-    return { host: String(d.host || DEFAULT_HOST).replace(/\/+$/, ""), camera: String(d.camera || ""), driver: ["canon", "nikon", "sony"].includes(d.driver) ? d.driver : "digicam", model: String(d.model || ""), zModel: String(d.zModel || "") };
+    return { host: String(d.host || DEFAULT_HOST).replace(/\/+$/, ""), camera: String(d.camera || ""), driver: ["canon", "nikon", "sony"].includes(d.driver) ? d.driver : process.platform === "linux" ? "gphoto2" : "digicam" /* Linux: digiCamControl tidak ada, semua lewat gPhoto2 */, model: String(d.model || ""), zModel: String(d.zModel || "") };
   };
   const q = (s) => encodeURIComponent(s);
 
